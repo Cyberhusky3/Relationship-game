@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arcade Relationship Game</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --panel: #333;
+            --panel-light: #444;
+            --danger: #ff5555;
+            --good: #55ffaa;
+            --accent: #55aaff;
+            --warning: #ffb347;
+        }
+
+        body {
+            background: radial-gradient(circle at top, #30364a 0, #222 45%, #151515 100%);
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 18px;
+            box-sizing: border-box;
+        }
+
+        #game-container {
+            width: min(720px, 100%);
+            text-align: center;
+            background: rgba(51, 51, 51, 0.96);
+            padding: 20px;
+            border-radius: 14px;
+            box-shadow: 0 12px 28px rgba(0,0,0,0.55);
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: clamp(24px, 5vw, 38px);
+            color: var(--warning);
+            text-shadow: 3px 3px 0 #111;
+        }
+
+        .subtitle {
+            margin: 0 0 16px;
+            color: #ddd;
+            line-height: 1.4;
+        }
+
+        canvas {
+            width: min(100%, 400px);
+            background: #111;
+            border: 4px solid #555;
+            display: block;
+            margin: 10px auto;
+            image-rendering: pixelated;
+        }
+
+        .stats, .memory-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .stat-card, .memory-card {
+            background: var(--panel-light);
+            border-radius: 8px;
+            padding: 10px;
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+
+        .stat-card strong, .memory-card strong {
+            display: block;
+            color: #ccc;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .stat-card span, .memory-card span {
+            font-size: 22px;
+            font-weight: bold;
+        }
+
+        #relationship.low { color: var(--danger); }
+        #relationship.safe { color: var(--good); }
+
+        .controls {
+            margin-top: 15px;
+        }
+
+        .choice-row {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        button {
+            background: #555;
+            color: white;
+            border: none;
+            padding: 10px 18px;
+            font-size: 17px;
+            cursor: pointer;
+            border-radius: 7px;
+            font-weight: bold;
+            font-family: inherit;
+        }
+
+        button:hover { transform: translateY(-1px); }
+        button:active { transform: translateY(1px); background: #777; }
+        #btn-a { border-bottom: 4px solid #a31d1d; }
+        #btn-b { border-bottom: 4px solid #1da332; }
+        #btn-reset { border-bottom: 4px solid #777; font-size: 14px; padding: 8px 12px; }
+
+        #message {
+            min-height: 48px;
+            background: #202020;
+            border-left: 4px solid var(--warning);
+            border-radius: 8px;
+            margin: 14px auto 0;
+            padding: 10px;
+            text-align: left;
+            line-height: 1.4;
+        }
+
+        #memory-log {
+            max-height: 110px;
+            overflow-y: auto;
+            text-align: left;
+            margin: 10px 0 0;
+            padding-left: 20px;
+            color: #ddd;
+        }
+
+        .hint {
+            color: #bbb;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <h1>Relationship Recall</h1>
+    <p class="subtitle">Dodge the tension, choose carefully, and watch how repeated negative choices change the game.</p>
+
+    <div class="stats">
+        <div class="stat-card"><strong>Score</strong><span id="score">0</span></div>
+        <div class="stat-card"><strong>Relationship</strong><span id="relationship">100</span></div>
+        <div class="stat-card"><strong>Mood</strong><span id="mood">Trusting</span></div>
+    </div>
+
+    <canvas id="gameCanvas" width="400" height="300" aria-label="Relationship Recall game board"></canvas>
+
+    <div class="memory-panel">
+        <div class="memory-card"><strong>Remembered Negatives</strong><span id="negative-count">0</span></div>
+        <div class="memory-card"><strong>Current Penalty</strong><span id="penalty">-5</span></div>
+        <div class="memory-card"><strong>Enemy Speed</strong><span id="speed">100</span></div>
+    </div>
+
+    <div class="controls">
+        <p class="hint">Use <b>Arrow Keys</b> to move. Press <b>A</b> for a negative option or <b>B</b> for a repairing option.</p>
+        <div class="choice-row">
+            <button id="btn-a">A: Dismiss Feelings</button>
+            <button id="btn-b">B: Listen & Repair</button>
+            <button id="btn-reset">Reset Memory</button>
+        </div>
+    </div>
+
+    <div id="message">The game remembers every negative option, even after refresh. Repeating A makes future A choices hurt more.</div>
+    <ol id="memory-log" aria-label="Remembered negative choices"></ol>
+</div>
+
+<script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const memoryKey = "relationshipRecall.negativeChoices";
+
+    let score = 0;
+    let relationship = 100;
+    let distanceLength = 0;
+    let distanceHeight = 0;
+    let enemySpeed = 100;
+    let isFollowing = true;
+    let effectTimer = 0;
+    let rememberedNegatives = loadNegativeChoices();
+
+    const mySprite = { x: 200, y: 200, size: 16, speed: 4 };
+    const myEnemy = { x: 50, y: 50, size: 16 };
+    const keys = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+
+    function loadNegativeChoices() {
+        try {
+            return JSON.parse(localStorage.getItem(memoryKey)) || [];
+        } catch {
+            return [];
+        }
+    }
+
+    function saveNegativeChoices() {
+        localStorage.setItem(memoryKey, JSON.stringify(rememberedNegatives));
+    }
+
+    function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    function currentNegativePenalty() {
+        return 5 + rememberedNegatives.length * 2;
+    }
+
+    function getMood() {
+        if (relationship >= 80) return "Trusting";
+        if (relationship >= 60) return "Concerned";
+        if (relationship >= 30) return "Hurt";
+        return "Withdrawn";
+    }
+
+    function checkRelationship() {
+        if (relationship >= 80) {
+            isFollowing = true;
+            enemySpeed = 100 + rememberedNegatives.length * 4;
+        } else if (relationship >= 60) {
+            isFollowing = true;
+            enemySpeed = 60 + rememberedNegatives.length * 3;
+        } else if (relationship >= 30) {
+            isFollowing = true;
+            enemySpeed = 35 + rememberedNegatives.length * 2;
+        } else {
+            isFollowing = false;
+            enemySpeed = 0;
+        }
+    }
+
+    function rememberNegativeChoice() {
+        rememberedNegatives.unshift({
+            text: "Dismissed feelings",
+            penalty: currentNegativePenalty(),
+            relationshipAfter: relationship,
+            time: new Date().toLocaleTimeString()
+        });
+        rememberedNegatives = rememberedNegatives.slice(0, 8);
+        saveNegativeChoices();
+    }
+
+    function negativeRelationship() {
+        relationship = clamp(relationship + 2, 0, 100);
+        score += 2;
+        setMessage("A small repair landed, but the old memories are still there. Keep choosing B to rebuild trust.");
+    }
+
+    function handleButtonA() {
+        const penalty = currentNegativePenalty();
+        relationship = clamp(relationship - penalty, 0, 100);
+        score -= penalty;
+        rememberNegativeChoice();
+        checkRelationship();
+        effectTimer = 30;
+        setMessage(`Negative option remembered. Future A choices now cost ${currentNegativePenalty()} relationship points.`);
+        updateUI();
+    }
+
+    function handleButtonB() {
+        if (relationship >= 30) {
+            const repair = rememberedNegatives.length > 0 ? 7 : 5;
+            relationship = clamp(relationship + repair, 0, 100);
+            score += repair;
+            if (rememberedNegatives.length > 0) {
+                rememberedNegatives.pop();
+                saveNegativeChoices();
+                setMessage("Repair chosen. One old negative memory softened and the penalty dropped.");
+            } else {
+                setMessage("Repair chosen. Trust grows when there are no negative memories left to heal.");
+            }
+        } else {
+            negativeRelationship();
+        }
+        checkRelationship();
+        updateUI();
+    }
+
+    function resetMemory() {
+        rememberedNegatives = [];
+        saveNegativeChoices();
+        checkRelationship();
+        setMessage("Memory reset. The relationship can start responding to choices without old baggage.");
+        updateUI();
+    }
+
+    function calculateDistance(start, end) {
+        distanceLength = start.x - end.x;
+        distanceHeight = start.y - end.y;
+        return Math.sqrt(distanceLength ** 2 + distanceHeight ** 2);
+    }
+
+    function setMessage(text) {
+        document.getElementById("message").innerText = text;
+    }
+
+    function updateUI() {
+        const relationshipEl = document.getElementById("relationship");
+        document.getElementById("score").innerText = score;
+        relationshipEl.innerText = relationship;
+        relationshipEl.className = relationship < 40 ? "low" : "safe";
+        document.getElementById("mood").innerText = getMood();
+        document.getElementById("negative-count").innerText = rememberedNegatives.length;
+        document.getElementById("penalty").innerText = `-${currentNegativePenalty()}`;
+        document.getElementById("speed").innerText = Math.round(enemySpeed);
+
+        const log = document.getElementById("memory-log");
+        log.innerHTML = "";
+        rememberedNegatives.forEach((choice) => {
+            const item = document.createElement("li");
+            item.innerText = `${choice.time}: ${choice.text} (-${choice.penalty}, relationship ${choice.relationshipAfter})`;
+            log.appendChild(item);
+        });
+    }
+
+    setInterval(() => {
+        if (relationship <= 30) {
+            calculateDistance(myEnemy, mySprite);
+            if (Math.abs(distanceHeight) <= 16) {
+                effectTimer = 30;
+            }
+        }
+    }, 1000);
+
+    window.addEventListener("keydown", (e) => {
+        if (e.key in keys) keys[e.key] = true;
+        if (e.key.toLowerCase() === "a") handleButtonA();
+        if (e.key.toLowerCase() === "b") handleButtonB();
+    });
+
+    window.addEventListener("keyup", (e) => {
+        if (e.key in keys) keys[e.key] = false;
+    });
+
+    document.getElementById("btn-a").addEventListener("click", handleButtonA);
+    document.getElementById("btn-b").addEventListener("click", handleButtonB);
+    document.getElementById("btn-reset").addEventListener("click", resetMemory);
+
+    function gameLoop() {
+        if (keys.ArrowUp) mySprite.y -= mySprite.speed;
+        if (keys.ArrowDown) mySprite.y += mySprite.speed;
+        if (keys.ArrowLeft) mySprite.x -= mySprite.speed;
+        if (keys.ArrowRight) mySprite.x += mySprite.speed;
+
+        mySprite.x = clamp(mySprite.x, 0, canvas.width - mySprite.size);
+        mySprite.y = clamp(mySprite.y, 0, canvas.height - mySprite.size);
+
+        if (isFollowing) {
+            const dx = mySprite.x - myEnemy.x;
+            const dy = mySprite.y - myEnemy.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 5) {
+                myEnemy.x += (dx / dist) * (enemySpeed / 60);
+                myEnemy.y += (dy / dist) * (enemySpeed / 60);
+            }
+        }
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#1d1d1d";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "rgba(255,255,255,0.05)";
+        for (let x = 0; x < canvas.width; x += 20) ctx.fillRect(x, 0, 1, canvas.height);
+        for (let y = 0; y < canvas.height; y += 20) ctx.fillRect(0, y, canvas.width, 1);
+
+        ctx.fillStyle = "#55aaff";
+        ctx.fillRect(mySprite.x, mySprite.y, mySprite.size, mySprite.size);
+
+        ctx.fillStyle = isFollowing ? "#ff5555" : "#777";
+        ctx.fillRect(myEnemy.x, myEnemy.y, myEnemy.size, myEnemy.size);
+
+        if (effectTimer > 0) {
+            ctx.strokeStyle = `rgba(255, 165, 0, ${effectTimer / 30})`;
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.arc(mySprite.x + 8, mySprite.y + 8, 20 + rememberedNegatives.length * 2, 0, Math.PI * 2);
+            ctx.stroke();
+            effectTimer--;
+        }
+
+        requestAnimationFrame(gameLoop);
+    }
+
+    checkRelationship();
+    updateUI();
+    gameLoop();
+</script>
+
+</body>
+</html>
