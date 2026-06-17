@@ -163,8 +163,6 @@
 
     <div class="memory-panel">
         <div class="memory-card"><strong>Remembered Negatives</strong><span id="negative-count">0</span></div>
-        <div class="memory-card"><strong>Total Negative Choices</strong><span id="total-negative-count">0</span></div>
-        <div class="memory-card"><strong>Trust Cap</strong><span id="trust-cap">100</span></div>
         <div class="memory-card"><strong>Current Penalty</strong><span id="penalty">-5</span></div>
         <div class="memory-card"><strong>Enemy Speed</strong><span id="speed">100</span></div>
     </div>
@@ -186,7 +184,6 @@
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
     const memoryKey = "relationshipRecall.negativeChoices";
-    const totalNegativesKey = "relationshipRecall.totalNegativeChoices";
 
     let score = 0;
     let relationship = 100;
@@ -196,7 +193,6 @@
     let isFollowing = true;
     let effectTimer = 0;
     let rememberedNegatives = loadNegativeChoices();
-    let totalNegativeChoices = loadTotalNegativeChoices();
 
     const mySprite = { x: 200, y: 200, size: 16, speed: 4 };
     const myEnemy = { x: 50, y: 50, size: 16 };
@@ -214,32 +210,15 @@
         localStorage.setItem(memoryKey, JSON.stringify(rememberedNegatives));
     }
 
-    function loadTotalNegativeChoices() {
-        return Number(localStorage.getItem(totalNegativesKey)) || 0;
-    }
-
-    function saveTotalNegativeChoices() {
-        localStorage.setItem(totalNegativesKey, String(totalNegativeChoices));
-    }
-
     function clamp(value, min, max) {
         return Math.max(min, Math.min(max, value));
     }
 
     function currentNegativePenalty() {
-        return 5 + rememberedNegatives.length * 2 + Math.floor(totalNegativeChoices / 3);
-    }
-
-    function currentTrustCap() {
-        return clamp(100 - totalNegativeChoices * 4, 20, 100);
-    }
-
-    function isAvoidingPlayer() {
-        return totalNegativeChoices >= 6 || (totalNegativeChoices >= 4 && relationship < 55);
+        return 5 + rememberedNegatives.length * 2;
     }
 
     function getMood() {
-        if (isAvoidingPlayer()) return "Avoiding You";
         if (relationship >= 80) return "Trusting";
         if (relationship >= 60) return "Concerned";
         if (relationship >= 30) return "Hurt";
@@ -247,12 +226,7 @@
     }
 
     function checkRelationship() {
-        relationship = clamp(relationship, 0, currentTrustCap());
-
-        if (isAvoidingPlayer()) {
-            isFollowing = false;
-            enemySpeed = 90 + totalNegativeChoices * 3;
-        } else if (relationship >= 80) {
+        if (relationship >= 80) {
             isFollowing = true;
             enemySpeed = 100 + rememberedNegatives.length * 4;
         } else if (relationship >= 60) {
@@ -263,18 +237,15 @@
             enemySpeed = 35 + rememberedNegatives.length * 2;
         } else {
             isFollowing = false;
-            enemySpeed = 20 + totalNegativeChoices * 2;
+            enemySpeed = 0;
         }
     }
 
     function rememberNegativeChoice() {
-        totalNegativeChoices++;
-        saveTotalNegativeChoices();
         rememberedNegatives.unshift({
             text: "Dismissed feelings",
             penalty: currentNegativePenalty(),
             relationshipAfter: relationship,
-            totalAtChoice: totalNegativeChoices,
             time: new Date().toLocaleTimeString()
         });
         rememberedNegatives = rememberedNegatives.slice(0, 8);
@@ -306,15 +277,9 @@
             if (rememberedNegatives.length > 0) {
                 rememberedNegatives.pop();
                 saveNegativeChoices();
-                if (isAvoidingPlayer()) {
-                    setMessage("You apologized, but they still avoid you because the total pattern of mean choices is too high.");
-                } else {
-                    setMessage("Repair chosen. One recent negative memory softened, but total trust damage remains.");
-                }
-            } else if (isAvoidingPlayer()) {
-                setMessage("You apologized, but their trust is capped by how many times you were mean before. Give them space.");
+                setMessage("Repair chosen. One old negative memory softened and the penalty dropped.");
             } else {
-                setMessage("Repair chosen. Trust grows when there are no recent negative memories left to heal.");
+                setMessage("Repair chosen. Trust grows when there are no negative memories left to heal.");
             }
         } else {
             negativeRelationship();
@@ -325,11 +290,9 @@
 
     function resetMemory() {
         rememberedNegatives = [];
-        totalNegativeChoices = 0;
         saveNegativeChoices();
-        saveTotalNegativeChoices();
         checkRelationship();
-        setMessage("Memory reset. Both recent memories and the total pattern of negative choices were cleared.");
+        setMessage("Memory reset. The relationship can start responding to choices without old baggage.");
         updateUI();
     }
 
@@ -350,8 +313,6 @@
         relationshipEl.className = relationship < 40 ? "low" : "safe";
         document.getElementById("mood").innerText = getMood();
         document.getElementById("negative-count").innerText = rememberedNegatives.length;
-        document.getElementById("total-negative-count").innerText = totalNegativeChoices;
-        document.getElementById("trust-cap").innerText = currentTrustCap();
         document.getElementById("penalty").innerText = `-${currentNegativePenalty()}`;
         document.getElementById("speed").innerText = Math.round(enemySpeed);
 
@@ -359,7 +320,7 @@
         log.innerHTML = "";
         rememberedNegatives.forEach((choice) => {
             const item = document.createElement("li");
-            item.innerText = `${choice.time}: ${choice.text} (-${choice.penalty}, relationship ${choice.relationshipAfter}, total ${choice.totalAtChoice || "?"})`;
+            item.innerText = `${choice.time}: ${choice.text} (-${choice.penalty}, relationship ${choice.relationshipAfter})`;
             log.appendChild(item);
         });
     }
@@ -396,20 +357,15 @@
         mySprite.x = clamp(mySprite.x, 0, canvas.width - mySprite.size);
         mySprite.y = clamp(mySprite.y, 0, canvas.height - mySprite.size);
 
-        const dx = mySprite.x - myEnemy.x;
-        const dy = mySprite.y - myEnemy.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        if (isAvoidingPlayer() && dist > 1 && dist < 180) {
-            myEnemy.x -= (dx / dist) * (enemySpeed / 60);
-            myEnemy.y -= (dy / dist) * (enemySpeed / 60);
-        } else if (isFollowing && dist > 5) {
-            myEnemy.x += (dx / dist) * (enemySpeed / 60);
-            myEnemy.y += (dy / dist) * (enemySpeed / 60);
+        if (isFollowing) {
+            const dx = mySprite.x - myEnemy.x;
+            const dy = mySprite.y - myEnemy.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 5) {
+                myEnemy.x += (dx / dist) * (enemySpeed / 60);
+                myEnemy.y += (dy / dist) * (enemySpeed / 60);
+            }
         }
-
-        myEnemy.x = clamp(myEnemy.x, 0, canvas.width - myEnemy.size);
-        myEnemy.y = clamp(myEnemy.y, 0, canvas.height - myEnemy.size);
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = "#1d1d1d";
@@ -422,7 +378,7 @@
         ctx.fillStyle = "#55aaff";
         ctx.fillRect(mySprite.x, mySprite.y, mySprite.size, mySprite.size);
 
-        ctx.fillStyle = isAvoidingPlayer() ? "#ffb347" : isFollowing ? "#ff5555" : "#777";
+        ctx.fillStyle = isFollowing ? "#ff5555" : "#777";
         ctx.fillRect(myEnemy.x, myEnemy.y, myEnemy.size, myEnemy.size);
 
         if (effectTimer > 0) {
